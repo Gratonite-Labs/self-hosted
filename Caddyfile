@@ -1,0 +1,10 @@
+# Replace yourdomain.com with your actual domain.
+# Caddy automatically provisions HTTPS via Let's Encrypt.
+
+yourdomain.com {
+    reverse_proxy gratonite-web:80
+}
+
+api.yourdomain.com {
+    reverse_proxy gratonite-api:4000
+}
