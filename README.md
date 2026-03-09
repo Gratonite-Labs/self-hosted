@@ -1,98 +1,105 @@
 # Gratonite Self-Hosted
 
-Deploy your own Gratonite instance using Docker Compose.
-
-## Prerequisites
-
-- A Linux server (Ubuntu 22.04+ recommended) with at least 2 GB RAM
-- [Docker Engine](https://docs.docker.com/engine/install/) and Docker Compose
-- Node.js 20+ and pnpm (for building)
-- A domain name with DNS pointing to your server
+Deploy your own Gratonite instance using pre-built Docker images. No coding, no build tools — just Docker and a domain name.
 
 ## Quick Start
 
 ```bash
-# 1. Clone the main repo
-git clone https://github.com/CoodayeA/Gratonite.git
-cd Gratonite
+# 1. Clone the repo
+git clone https://github.com/CoodayeA/Gratonite.git && cd Gratonite
 
-# 2. Configure environment
-cp deploy/.env.example .env
-# Edit .env — set DB_PASSWORD, JWT secrets, SMTP, domain, LiveKit credentials
+# 2. Configure
+cp deploy/self-host/.env.example deploy/self-host/.env
+nano deploy/self-host/.env
+# Set: INSTANCE_DOMAIN, ADMIN_EMAIL, ADMIN_PASSWORD, DB_PASSWORD
 
-# 3. Build
-cd apps/api && pnpm install && pnpm run build && cd ../..
-cd apps/web && pnpm install && pnpm run build && cd ../..
+# 3. Launch
+docker compose -f deploy/self-host/docker-compose.yml up -d
 
-# 4. Update deploy/Caddyfile with your domain
+# 4. Verify
+docker compose -f deploy/self-host/docker-compose.yml logs setup
+# Should end with: "=== Setup complete! ==="
 
-# 5. Start
-cd deploy
-docker compose -f docker-compose.production.yml up -d
-
-# 6. Run migrations
-docker exec gratonite-api sh -c "cd /app && node dist/db/migrate.js"
-
-# 7. Visit https://yourdomain.com
+# 5. Open https://your-domain.com and log in
 ```
+
+That's it. The setup container automatically runs all database migrations, generates JWT secrets and an Ed25519 instance keypair, and creates your admin account. Caddy handles HTTPS certificates via Let's Encrypt.
+
+## Requirements
+
+- A Linux server with at least **1 GB RAM** (2 GB recommended)
+- **Docker Engine 24+** and **Docker Compose v2**
+- A **domain name** with an A record pointing to your server
+- Ports **80** and **443** open
+
+You do **not** need Node.js, npm, pnpm, or any build tools.
 
 ## What Gets Deployed
 
-| Service    | Container            | Description                          |
-|------------|----------------------|--------------------------------------|
-| PostgreSQL | `gratonite-postgres` | Primary database                     |
-| Redis      | `gratonite-redis`    | Cache and real-time state            |
-| API        | `gratonite-api`      | Node.js backend (port 4000)          |
-| Web        | `gratonite-web`      | Nginx serving React build            |
-| Caddy      | `gratonite-caddy`    | Reverse proxy with automatic HTTPS   |
+| Service | Image | Purpose |
+|---------|-------|---------|
+| **setup** | `ghcr.io/coodayea/gratonite-setup` | First-run init: migrations, keys, admin account |
+| **api** | `ghcr.io/coodayea/gratonite-api` | Node.js API + Socket.IO real-time |
+| **web** | `ghcr.io/coodayea/gratonite-web` | React SPA served by nginx |
+| **postgres** | `postgres:16-alpine` | Database |
+| **redis** | `redis:7-alpine` | Cache and rate limiting |
+| **caddy** | `caddy:2-alpine` | Reverse proxy with auto-HTTPS |
 
-## Environment Variables
+## Configuration
 
-```env
-DB_PASSWORD=             # PostgreSQL password
-JWT_SECRET=              # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-JWT_REFRESH_SECRET=      # Generate a different one
-SMTP_HOST=               # SMTP server (e.g. smtp.sendgrid.net)
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASS=
-SMTP_FROM=noreply@yourdomain.com
-APP_URL=https://yourdomain.com
-CORS_ORIGIN=https://yourdomain.com
-LIVEKIT_URL=             # For voice/video
-LIVEKIT_API_KEY=
-LIVEKIT_API_SECRET=
-```
+Only **4 values** are required in your `.env` file:
+
+| Variable | What to set |
+|----------|------------|
+| `INSTANCE_DOMAIN` | Your domain (e.g. `chat.example.com`) |
+| `ADMIN_EMAIL` | Your email address |
+| `ADMIN_PASSWORD` | A strong password |
+| `DB_PASSWORD` | A random database password (16+ chars) |
+
+Everything else (JWT secrets, APP_URL, CORS_ORIGIN) is auto-generated.
 
 ## Updating
 
 ```bash
-cd Gratonite && git pull
-cd apps/api && pnpm install && pnpm run build && cd ../..
-cd apps/web && pnpm install && pnpm run build && cd ../..
-cd deploy && docker compose -f docker-compose.production.yml up -d --force-recreate api web
-docker exec gratonite-api sh -c "cd /app && node dist/db/migrate.js"
+cd Gratonite
+git pull
+docker compose -f deploy/self-host/docker-compose.yml pull
+docker compose -f deploy/self-host/docker-compose.yml up -d
 ```
+
+Migrations run automatically. Data is preserved.
 
 ## Backups
 
 ```bash
-docker exec gratonite-postgres pg_dump -U gratonite gratonite > backup_$(date +%Y%m%d).sql
+# Database
+docker compose -f deploy/self-host/docker-compose.yml exec postgres \
+  pg_dump -U gratonite gratonite | gzip > backup-$(date +%Y%m%d).sql.gz
+
+# Uploads
+docker compose -f deploy/self-host/docker-compose.yml cp api:/app/uploads ./uploads-backup
 ```
+
+## Federation (Optional)
+
+Connect your instance to other Gratonite instances and list your servers on the [Discover](https://gratonite.chat/app/discover) directory:
+
+```bash
+# In your .env:
+FEDERATION_ENABLED=true
+FEDERATION_DISCOVER_REGISTRATION=true
+```
+
+Restart the API: `docker compose -f deploy/self-host/docker-compose.yml restart api`
+
+Your public servers sync to gratonite.chat every 30 minutes.
 
 ## Full Documentation
 
-For detailed deployment guides, DNS setup, and SMTP configuration, see the [main repository docs](https://github.com/CoodayeA/Gratonite/tree/main/docs):
-
-- [Self-Hosting Guide](https://github.com/CoodayeA/Gratonite/blob/main/docs/DEPLOY-TO-OWN-SERVER.md)
-- [VPS Deployment](https://github.com/CoodayeA/Gratonite/blob/main/docs/DEPLOY-TO-HETZNER.md)
-- [DNS Configuration](https://github.com/CoodayeA/Gratonite/blob/main/docs/DNS-CONFIGURATION.md)
-- [SMTP Configuration](https://github.com/CoodayeA/Gratonite/blob/main/docs/SMTP-CONFIGURATION.md)
+- **[Self-Hosting Guide](https://github.com/CoodayeA/Gratonite/blob/main/docs/federation/self-hosting-guide.md)** — Complete setup, configuration, DNS, troubleshooting
+- **[Federation Guide](https://github.com/CoodayeA/Gratonite/blob/main/docs/federation/federation-guide.md)** — Connecting to other instances
+- **[Protocol Spec](https://github.com/CoodayeA/Gratonite/blob/main/docs/federation/protocol-spec.md)** — Federation protocol technical reference
 
 ## Source of Truth
 
-The deployment configuration lives in the [main Gratonite repo](https://github.com/CoodayeA/Gratonite) under `deploy/`. This repo provides a quick-start reference.
-
-## License
-
-See the [main repository](https://github.com/CoodayeA/Gratonite) for license information.
+All source code, Docker images, and deployment configuration lives in the [main Gratonite repo](https://github.com/CoodayeA/Gratonite). This repo provides a quick-start reference for self-hosters.
